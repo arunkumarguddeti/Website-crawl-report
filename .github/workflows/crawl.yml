@@ -1,1 +1,73 @@
+name: Broken Link Crawler
 
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Website URL to crawl'
+        required: true
+        default: 'https://www.example.com'
+      max_depth:
+        description: 'Maximum crawl depth'
+        required: false
+        default: '8'
+      max_pages:
+        description: 'Hard cap on pages'
+        required: false
+        default: '3000'
+      concurrency:
+        description: 'Parallel workers'
+        required: false
+        default: '10'
+  schedule:
+    - cron: '0 8 * * 1'
+
+jobs:
+  crawl:
+    name: Run Crawler
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run broken link crawler
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url || 'https://www.example.com' }}
+          MAX_DEPTH: ${{ github.event.inputs.max_depth || '8' }}
+          MAX_PAGES: ${{ github.event.inputs.max_pages || '3000' }}
+          CONCURRENCY: ${{ github.event.inputs.concurrency || '10' }}
+          TIMEOUT: '10'
+          POLITE_DELAY: '0.3'
+          RESPECT_ROBOTS: 'true'
+          OUTPUT_DIR: './reports'
+        run: |
+          python crawler.py
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: broken-link-report-${{ github.run_number }}
+          path: |
+            reports/*.html
+            reports/*.csv
+          retention-days: 30
+
+      - name: Print summary
+        if: always()
+        run: |
+          echo "## Reports Generated" >> $GITHUB_STEP_SUMMARY
+          ls -lh reports/ >> $GITHUB_STEP_SUMMARY || echo "No reports directory found."
