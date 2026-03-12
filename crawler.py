@@ -703,14 +703,21 @@ def build_html_report(results: list[dict], csv_path: str, elapsed: float,
             f'<li><a href="{u}" target="_blank" style="color:#93c5fd">{u}</a></li>'
             for u in target_pages
         )
-        targeted_info_html = f"""
-  <div style="background:#1e293b;border:1px solid #7c3aed;border-radius:10px;padding:14px 18px;margin-bottom:18px">
-    <div style="font-weight:700;color:#c4b5fd;margin-bottom:8px">🎯 Targeted Scan — {target_count} page(s) scanned</div>
-    {"<b style=\'color:#94a3b8\'>Label: </b><span style=\'color:#e2e8f0\'>" + scan_label + "</span><br><br>" if scan_label else ""}
-    <ul style="list-style:none;display:flex;flex-direction:column;gap:4px;padding:0">{tp_items}</ul>
-  </div>"""
-    else:
-        targeted_info_html = ""
+        label_html = (
+            '<b style="color:#94a3b8">Label: </b>'
+            '<span style="color:#e2e8f0">' + scan_label + '</span><br><br>'
+        ) if scan_label else ""
+        targeted_info_html = (
+            '<div style="background:#1e293b;border:1px solid #7c3aed;' +
+            'border-radius:10px;padding:14px 18px;margin-bottom:18px">' +
+            '<div style="font-weight:700;color:#c4b5fd;margin-bottom:8px">' +
+            f"\U0001f3af Targeted Scan \u2014 {target_count} page(s) scanned" +
+            '</div>' +
+            label_html +
+            '<ul style="list-style:none;display:flex;flex-direction:column;gap:4px;padding:0">' +
+            tp_items +
+            '</ul></div>'
+        )
 
     def row_class(status):
         s = str(status)
