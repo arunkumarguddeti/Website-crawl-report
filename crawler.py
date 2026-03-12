@@ -76,6 +76,20 @@ CONFIG = {
             "/?query=,/?q=,/page="
         ).split(",")
     ),
+
+    # ── Targeted page scan ────────────────────────────────────────────────
+    # Comma-separated list of specific page URLs to scan.
+    # When set, the full BFS crawl is skipped entirely — only these exact
+    # pages are fetched and their links are checked.
+    # Example: "https://site.com/about,https://site.com/contact"
+    # Set via env var TARGET_PAGES or the GitHub Actions workflow input.
+    "TARGET_PAGES": [
+        u.strip() for u in os.getenv("TARGET_PAGES", "").split(",")
+        if u.strip()
+    ],
+
+    # Optional label shown in the report header for targeted scans
+    "SCAN_LABEL": os.getenv("SCAN_LABEL", ""),
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -337,6 +351,96 @@ def extract_links(html: str, page_url: str) -> list[tuple[str, str]]:
 
 
 # ──────────────────────────────────────────────
+#  TARGETED CRAWL  — scan a specific list of pages only
+#  No BFS. No following links. Just fetch each given page,
+#  check every link on it, and return results.
+# ──────────────────────────────────────────────
+
+async def targeted_crawl(target_urls: list[str]) -> list[dict]:
+    """
+    Fetch each URL in target_urls, check all their outbound links,
+    and return results — without crawling further.
+    """
+    base_url   = CONFIG["BASE_URL"].rstrip("/")
+    sem        = asyncio.Semaphore(CONFIG["CONCURRENCY"])
+    link_cache: dict = {}
+    results:    list[dict] = []
+
+    log.info("TARGETED MODE — scanning %d specific page(s):", len(target_urls))
+    for u in target_urls:
+        log.info("  → %s", u)
+
+    connector = aiohttp.TCPConnector(
+        limit=CONFIG["CONCURRENCY"] + 5,
+        ssl=False,
+        force_close=False,
+        enable_cleanup_closed=True,
+    )
+
+    async with aiohttp.ClientSession(connector=connector) as session:
+
+        async def scan_page(page_url: str):
+            log.info("Scanning page: %s", page_url)
+            async with sem:
+                status, html, final_url = await fetch_page_html(session, page_url)
+
+            if str(status) != "200":
+                results.append({
+                    "page_url":  page_url,
+                    "link_url":  page_url,
+                    "link_text": "(page itself)",
+                    "link_type": "Page",
+                    "status":    status,
+                    "final_url": final_url,
+                    "load_ms":   -1,
+                    "depth":     0,
+                    "effort":    effort_level(status),
+                    "category":  status_category(status),
+                    "timestamp": now_est().strftime("%Y-%m-%d %H:%M:%S EST"),
+                })
+                return
+
+            if should_skip_parse(page_url):
+                return
+
+            page_links = extract_links(html, page_url)
+            if not page_links:
+                log.info("  No links found on %s", page_url)
+                return
+
+            log.info("  Found %d links on %s", len(page_links), page_url)
+
+            async def check_one(link_url: str, link_text: str):
+                async with sem:
+                    lnk_status, lnk_final, lnk_load_ms = await check_link_status(
+                        session, link_url, link_cache)
+                link_type = ("Internal"
+                             if is_same_domain(link_url, base_url)
+                             else "External")
+                results.append({
+                    "page_url":  page_url,
+                    "link_url":  link_url,
+                    "link_text": link_text,
+                    "link_type": link_type,
+                    "status":    lnk_status,
+                    "final_url": lnk_final,
+                    "load_ms":   lnk_load_ms,
+                    "depth":     0,
+                    "effort":    effort_level(lnk_status),
+                    "category":  status_category(lnk_status),
+                    "timestamp": now_est().strftime("%Y-%m-%d %H:%M:%S EST"),
+                })
+
+            await asyncio.gather(*[check_one(lu, lt) for lu, lt in page_links])
+
+        # Scan all target pages concurrently (respecting semaphore)
+        await asyncio.gather(*[scan_page(u) for u in target_urls])
+
+    log.info("Targeted scan complete. %d link records collected.", len(results))
+    return results
+
+
+# ──────────────────────────────────────────────
 #  MAIN CRAWL  (BFS + async 10-worker semaphore)
 # ──────────────────────────────────────────────
 
@@ -546,7 +650,8 @@ def write_csv(results: list[dict], path: str):
 #  Excel export uses SheetJS (CDN) — no server needed, works offline.
 # ──────────────────────────────────────────────
 
-def build_html_report(results: list[dict], csv_path: str, elapsed: float) -> str:
+def build_html_report(results: list[dict], csv_path: str, elapsed: float,
+                      scan_mode: str = "full", target_pages: list = None) -> str:
 
     PAGE_SIZE = 100
 
@@ -582,9 +687,30 @@ def build_html_report(results: list[dict], csv_path: str, elapsed: float) -> str
     bar_labels = json.dumps([p[:60]+"…" if len(p) > 60 else p for p,_ in top_broken])
     bar_values = json.dumps([v for _,v in top_broken])
 
-    run_date  = now_est().strftime("%Y-%m-%d %H:%M:%S EST")
-    run_dur   = fmt_duration(elapsed)
-    base_url  = CONFIG["BASE_URL"]
+    run_date   = now_est().strftime("%Y-%m-%d %H:%M:%S EST")
+    run_dur    = fmt_duration(elapsed)
+    base_url   = CONFIG["BASE_URL"]
+    scan_label = CONFIG.get("SCAN_LABEL", "")
+    mode_badge = (
+        f'<span style="background:#7c3aed;color:#fff;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;margin-left:10px">🎯 TARGETED SCAN</span>'
+        if scan_mode == "targeted" else
+        f'<span style="background:#0369a1;color:#fff;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;margin-left:10px">🌐 FULL CRAWL</span>'
+    )
+    target_count = len(target_pages) if target_pages else 0
+    # Build targeted pages info block for HTML
+    if scan_mode == "targeted" and target_pages:
+        tp_items = "".join(
+            f'<li><a href="{u}" target="_blank" style="color:#93c5fd">{u}</a></li>'
+            for u in target_pages
+        )
+        targeted_info_html = f"""
+  <div style="background:#1e293b;border:1px solid #7c3aed;border-radius:10px;padding:14px 18px;margin-bottom:18px">
+    <div style="font-weight:700;color:#c4b5fd;margin-bottom:8px">🎯 Targeted Scan — {target_count} page(s) scanned</div>
+    {"<b style=\'color:#94a3b8\'>Label: </b><span style=\'color:#e2e8f0\'>" + scan_label + "</span><br><br>" if scan_label else ""}
+    <ul style="list-style:none;display:flex;flex-direction:column;gap:4px;padding:0">{tp_items}</ul>
+  </div>"""
+    else:
+        targeted_info_html = ""
 
     def row_class(status):
         s = str(status)
@@ -732,12 +858,13 @@ def build_html_report(results: list[dict], csv_path: str, elapsed: float) -> str
 
 <div class="header">
   <div>
-    <h1>Broken Link Report — <span>{base_url}</span></h1>
+    <h1>Broken Link Report — <span>{base_url}</span>{mode_badge}</h1>
     <div class="meta">
       <span>Run date: <b>{run_date}</b></span>
       <span>Duration: <b>{run_dur}</b></span>
-      <span>Depth: <b>{CONFIG["MAX_DEPTH"]}</b></span>
+      {"<span>Pages scanned: <b>" + str(target_count) + "</b></span>" if scan_mode == "targeted" else f'<span>Depth: <b>{CONFIG["MAX_DEPTH"]}</b></span>'}
       <span>Workers: <b>{CONFIG["CONCURRENCY"]}</b></span>
+      {"<span>Label: <b>" + scan_label + "</b></span>" if scan_label else ""}
     </div>
   </div>
   <div class="hdr-btns">
@@ -747,6 +874,7 @@ def build_html_report(results: list[dict], csv_path: str, elapsed: float) -> str
 
 <div class="container">
 
+{targeted_info_html}
   <div class="cards">
     <div class="card c-white"  onclick="cardFilter('')"          id="card-all">     <div class="val">{total_pages:,}</div><div class="lbl">Parent Pages</div></div>
     <div class="card c-white"  onclick="cardFilter('')"          id="card-links">   <div class="val">{total_links:,}</div><div class="lbl">Total Links</div></div>
@@ -1185,38 +1313,52 @@ def write_excel(results: list[dict], path: str):
 
 async def main():
     start_time = time.time()
-    log.info("Starting crawl of %s", CONFIG["BASE_URL"])
+    log.info("Starting — BASE_URL=%s", CONFIG["BASE_URL"])
     log.info("Config: MAX_DEPTH=%d  MAX_PAGES=%d  CONCURRENCY=%d  TIMEOUT=%ds",
              CONFIG["MAX_DEPTH"], CONFIG["MAX_PAGES"],
              CONFIG["CONCURRENCY"], CONFIG["TIMEOUT"])
 
-    results = await crawl()
+    # ── Decide crawl mode ────────────────────────────────────────
+    target_pages = CONFIG.get("TARGET_PAGES", [])
+    scan_mode    = "targeted" if target_pages else "full"
+
+    if scan_mode == "targeted":
+        log.info("Mode: TARGETED — %d page(s) specified", len(target_pages))
+        results = await targeted_crawl(target_pages)
+    else:
+        log.info("Mode: FULL CRAWL — starting from %s", CONFIG["BASE_URL"])
+        results = await crawl()
 
     if not results:
-        log.warning("No results collected. Check BASE_URL and network access.")
+        log.warning("No results collected. Check URLs and network access.")
         return
 
     elapsed  = time.time() - start_time
     dur_str  = fmt_duration(elapsed)
     run_date = now_est().strftime("%Y-%m-%d %H:%M:%S EST")
     ts_tag   = now_est().strftime("%Y%m%d_%H%M%S")
+    label    = CONFIG.get("SCAN_LABEL", "")
+    safe_label = label.replace(" ", "_").replace("/", "_")[:30] if label else ""
+    file_tag   = f"{ts_tag}_{safe_label}" if safe_label else ts_tag
 
     output_dir = Path(CONFIG["OUTPUT_DIR"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    csv_path   = str(output_dir / f"broken_links_{ts_tag}.csv")
-    html_path  = str(output_dir / f"report_{ts_tag}.html")
-    xlsx_path  = str(output_dir / f"broken_links_{ts_tag}.xlsx")
+    csv_path   = str(output_dir / f"broken_links_{file_tag}.csv")
+    html_path  = str(output_dir / f"report_{file_tag}.html")
+    xlsx_path  = str(output_dir / f"broken_links_{file_tag}.xlsx")
 
     write_csv(results, csv_path)
     write_excel(results, xlsx_path)
 
-    html = build_html_report(results, csv_path, elapsed)
+    html = build_html_report(results, csv_path, elapsed,
+                             scan_mode=scan_mode,
+                             target_pages=target_pages)
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
     log.info("HTML report written → %s", html_path)
 
-    # index.html — GitHub Pages serves this as the live report URL
+    # index.html — GitHub Pages always serves the most recent run
     index_path = str(output_dir / "index.html")
     with open(index_path, "w", encoding="utf-8") as f:
         f.write(html)
@@ -1224,8 +1366,10 @@ async def main():
 
     broken = sum(1 for r in results if str(r["status"]) in ("404","410","451"))
     ok     = sum(1 for r in results if str(r["status"]) == "200")
+    mode_str = f"TARGETED ({len(target_pages)} pages)" if scan_mode == "targeted" else "FULL CRAWL"
     print(f"\n{'─'*60}")
-    print(f"  CRAWL SUMMARY")
+    print(f"  SCAN SUMMARY  [{mode_str}]")
+    if label: print(f"  Label      : {label}")
     print(f"  Base URL   : {CONFIG['BASE_URL']}")
     print(f"  Run Date   : {run_date}")
     print(f"  Pages      : {len({r['page_url'] for r in results}):,}")
@@ -1239,15 +1383,23 @@ async def main():
     print(f"{'─'*60}\n")
 
     if os.getenv("GITHUB_STEP_SUMMARY"):
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
-            f.write(f"## Crawl Results for `{CONFIG['BASE_URL']}`\n\n")
-            f.write(f"| Metric | Value |\n|---|---|\n")
-            f.write(f"| Run Date (EST) | {run_date} |\n")
-            f.write(f"| Pages Crawled | {len({r["page_url"] for r in results}):,} |\n")
-            f.write(f"| Total Links | {len(results):,} |\n")
-            f.write(f"| 200 OK | {ok:,} |\n")
-            f.write(f"| Broken (404/410) | {broken:,} |\n")
-            f.write(f"| Duration | {dur_str} |\n")
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as gf:
+            gf.write(f"## {'🎯 Targeted Scan' if scan_mode=='targeted' else '🌐 Full Crawl'} — `{CONFIG['BASE_URL']}`\n\n")
+            if label:
+                gf.write(f"**Label:** {label}\n\n")
+            if scan_mode == "targeted":
+                gf.write(f"**Pages scanned:**\n")
+                for u in target_pages:
+                    gf.write(f"- {u}\n")
+                gf.write("\n")
+            gf.write(f"| Metric | Value |\n|---|---|\n")
+            gf.write(f"| Mode | {mode_str} |\n")
+            gf.write(f"| Run Date (EST) | {run_date} |\n")
+            gf.write(f"| Pages Scanned | {len({r['page_url'] for r in results}):,} |\n")
+            gf.write(f"| Total Links | {len(results):,} |\n")
+            gf.write(f"| 200 OK | {ok:,} |\n")
+            gf.write(f"| Broken (404/410) | {broken:,} |\n")
+            gf.write(f"| Duration | {dur_str} |\n")
 
 
 if __name__ == "__main__":
