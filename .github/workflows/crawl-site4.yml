@@ -1,0 +1,252 @@
+# ─────────────────────────────────────────────────────────────
+#  crawl-site4.yml
+#  Set BASE_URL_SITE3 in repo Settings → Secrets → Actions
+#  Runs 60 min after Site 1 to avoid Pages conflicts.
+# ─────────────────────────────────────────────────────────────
+name: Broken Link Crawler — Site 4
+
+on:
+  workflow_dispatch:
+    inputs:
+      scan_mode:
+        description: 'Scan mode — choose FIRST'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - targeted
+      base_url:
+        description: '[FULL MODE] Website to crawl / [TARGETED MODE] Site root for domain matching'
+        required: true
+        default: 'https://www.site4.com'
+      target_pages:
+        description: '[TARGETED ONLY] Comma-separated URLs. Example: https://site.com/about,https://site.com/contact'
+        required: false
+        default: ''
+      scan_label:
+        description: 'Optional label shown in report header (e.g. "Sprint-42")'
+        required: false
+        default: ''
+      max_depth:
+        description: '[FULL MODE] Max crawl depth'
+        required: false
+        default: '8'
+      max_pages:
+        description: '[FULL MODE] Max pages to crawl'
+        required: false
+        default: '3000'
+      concurrency:
+        description: 'Parallel workers'
+        required: false
+        default: '10'
+
+  schedule:
+    #  EST (UTC-5):  7:30 AM = 12:00 UTC  |  9:30 PM = 02:00 UTC
+    #  EDT (UTC-4):  7:30 AM = 11:00 UTC  |  9:30 PM = 01:00 UTC
+    - cron: '30 12 * * *'
+    - cron: '30 11 * * *'
+    - cron: '30 2  * * *'
+    - cron: '30 1  * * *'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  crawl-site4:
+    name: Crawl Site 4 (${{ github.event.inputs.scan_mode || 'scheduled-full' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+      - name: Check dedup slot
+        id: dedup
+        if: github.event_name == 'schedule'
+        run: |
+          HOUR=$(date -u +%H)
+          DATE=$(TZ=America/New_York date +%Y-%m-%d)
+          if   [ "$HOUR" -ge 8  ] && [ "$HOUR" -lt 16 ]; then SLOT="morning"
+          elif [ "$HOUR" -ge 16 ] || [ "$HOUR" -lt 8  ]; then SLOT="evening"
+          else SLOT="night"
+          fi
+          echo "slot_key=site4-${DATE}-${SLOT}" >> $GITHUB_OUTPUT
+          echo "Slot: site4-${DATE}-${SLOT}"
+
+      - name: Restore dedup cache
+        id: cache
+        if: github.event_name == 'schedule'
+        uses: actions/cache@v4
+        with:
+          path: .dedup
+          key: ${{ steps.dedup.outputs.slot_key }}
+
+      - name: Skip if already ran this slot
+        if: github.event_name == 'schedule' && steps.cache.outputs.cache-hit == 'true'
+        run: echo "Already ran this slot — skipping duplicate DST trigger." && exit 0
+
+      - name: Mark slot as used
+        if: github.event_name == 'schedule'
+        run: mkdir -p .dedup && echo "done" > .dedup/ran
+
+      - uses: actions/setup-python@v5
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate inputs
+        run: |
+          MODE="${{ github.event.inputs.scan_mode }}"
+          PAGES="${{ github.event.inputs.target_pages }}"
+          if [ "$MODE" = "targeted" ] && [ -z "$PAGES" ]; then
+            echo "❌ scan_mode is 'targeted' but target_pages is empty."
+            exit 1
+          fi
+          echo "✅ Mode: ${MODE:-scheduled-full}"
+
+      - name: Run crawler
+        env:
+          BASE_URL:       ${{ github.event.inputs.base_url || secrets.BASE_URL_SITE3 || 'https://www.site4.com' }}
+          TARGET_PAGES:   ${{ github.event.inputs.target_pages || '' }}
+          SCAN_LABEL:     ${{ github.event.inputs.scan_label || '' }}
+          MAX_DEPTH:      ${{ github.event.inputs.max_depth || '8' }}
+          MAX_PAGES:      ${{ github.event.inputs.max_pages || '3000' }}
+          CONCURRENCY:    ${{ github.event.inputs.concurrency || '10' }}
+          TIMEOUT:        '10'
+          POLITE_DELAY:   '0.3'
+          RESPECT_ROBOTS: 'true'
+          OUTPUT_DIR:     './reports'
+        run: python crawler.py
+
+      - name: Verify reports
+        run: |
+          ls -lh reports/
+          test -f reports/index.html && echo "✅ index.html found" || (echo "❌ Missing" && exit 1)
+
+      - name: Archive report to gh-pages
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin gh-pages 2>/dev/null || true
+          git worktree add /tmp/gh-pages origin/gh-pages 2>/dev/null || \
+            (git worktree add --orphan -b gh-pages /tmp/gh-pages && echo "Created gh-pages")
+          mkdir -p /tmp/gh-pages/archive/site4
+          cp reports/*.html /tmp/gh-pages/archive/site4/ 2>/dev/null || true
+          cp reports/*.csv  /tmp/gh-pages/archive/site4/ 2>/dev/null || true
+          cp reports/*.xlsx /tmp/gh-pages/archive/site4/ 2>/dev/null || true
+          find /tmp/gh-pages/archive/site4 -type f -mtime +60 -delete 2>/dev/null || true
+          cd /tmp/gh-pages
+          python3 - << 'PYEOF'
+          import re
+          from pathlib import Path
+          files = sorted(Path("archive/site4").glob("report_*.html"), reverse=True)
+          rows = ""
+          for f in files[:50]:
+              name = f.name
+              m = re.search(r"(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})", name)
+              label = f"{m.group(1)}-{m.group(2)}-{m.group(3)} {m.group(4)}:{m.group(5)}:{m.group(6)} EST" if m else name
+              rows += f'<tr><td><a href="site4/{name}">{label}</a></td><td>{name}</td></tr>\n'
+          html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+          <title>Site 4 Archive</title>
+          <style>body{{font-family:sans-serif;background:#0f172a;color:#e2e8f0;padding:30px}}
+          a{{color:#60a5fa}}table{{width:100%;border-collapse:collapse;margin-top:20px}}
+          th,td{{padding:10px 14px;border:1px solid #334155}}th{{background:#1e293b}}
+          tr:hover{{background:#1e293b}}</style></head>
+          <body><h1>📂 Site 4 Report Archive</h1>
+          <p>{len(files)} reports · auto-deleted after 60 days</p>
+          <table><thead><tr><th>Run Date (EST)</th><th>File</th></tr></thead>
+          <tbody>{rows}</tbody></table></body></html>"""
+          Path("archive/site4/index.html").write_text(html)
+          PYEOF
+          git add -A
+          git diff --cached --quiet || git commit -m "Archive site4 $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push origin gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+        with:
+          name: site4-report-${{ github.event.inputs.scan_label || github.run_number }}
+          path: |
+            reports/*.html
+            reports/*.csv
+            reports/*.xlsx
+          retention-days: 30
+
+      - name: Upload to GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./reports
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Send email (Gmail App Password)
+        if: ${{ always() && secrets.MAIL_PASSWORD != '' }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          to: ${{ secrets.MAIL_TO }}
+          from: Crawl Reports <${{ secrets.MAIL_USERNAME }}>
+          subject: "🔗 Broken Link Report — ${{ github.event.inputs.base_url || secrets.BASE_URL_SITE3 }} — Run #${{ github.run_number }}"
+          convert_markdown: true
+          body: |
+            ## Broken Link Report Complete
+
+            **Site:** ${{ github.event.inputs.base_url || secrets.BASE_URL_SITE3 }}
+            **Mode:** ${{ github.event.inputs.scan_mode || 'full (scheduled)' }}
+            **Label:** ${{ github.event.inputs.scan_label || '—' }}
+            **Status:** ${{ job.status }}
+
+            📊 **[View Live Report](${{ steps.deployment.outputs.page_url }})**
+
+            📁 **[Download ZIP](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})**
+
+      - name: Send email (SendGrid)
+        if: ${{ always() && secrets.SENDGRID_API_KEY != '' }}
+        uses: peter-evans/sendgrid-action@v1
+        with:
+          api-key: ${{ secrets.SENDGRID_API_KEY }}
+          to: ${{ secrets.MAIL_TO }}
+          from: ${{ secrets.MAIL_FROM }}
+          subject: "🔗 Site 4 Report — Run #${{ github.run_number }}"
+          body: |
+            Crawl complete.
+            Live report: ${{ steps.deployment.outputs.page_url }}
+            Download: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## ✅ Site 4 Scan Complete" >> $GITHUB_STEP_SUMMARY
+          echo "**Live report:** ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+          ls -lh reports/ | awk 'NR>1 {print "| " $9 " | " $5 " |"}' >> $GITHUB_STEP_SUMMARY || true
