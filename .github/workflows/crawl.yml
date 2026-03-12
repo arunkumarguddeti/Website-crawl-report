@@ -47,7 +47,8 @@ on:
         default: '10'
 
   schedule:
-    - cron: '0 13 * * 1'   # Every Monday 9:00 AM EST (13:00 UTC)
+    - cron: '0 9 * * *'   # Everyday 6:00 AM EST (9:00 UTC)
+    - cron: '0 23 * * *' # Everyday 8:00 PM EST (23:00 UTC)
 
 permissions:
   contents: read
