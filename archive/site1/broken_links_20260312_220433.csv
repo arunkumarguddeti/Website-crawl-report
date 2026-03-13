@@ -1,0 +1,2 @@
+page_url,link_url,link_text,link_type,status,final_url,load_ms,depth,effort,category,timestamp
+https://www.example.com/,https://iana.org/domains/example,Learn more,External,200,http://www.iana.org/help/example-domains,528,0,None,OK,2026-03-12 22:04:33 EST
