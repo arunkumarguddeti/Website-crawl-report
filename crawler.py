@@ -770,8 +770,13 @@ def build_html_report(results: list[dict], csv_path: str, elapsed: float,
     # Web-safe JSON: escape < and > so NO HTML tag (</script>, </div>, etc.)
     # can ever break the script block, regardless of what URLs/text are crawled.
     # \u003c = <  |  \u003e = >  — valid JSON, browsers decode transparently.
-    all_data_json = json.dumps(js_rows, ensure_ascii=True)
-    all_data_json = all_data_json.replace("<", "\u003c").replace(">", "\u003e")
+    # Base64-encode the JSON so NO character in any crawled URL, anchor text,
+    # or page content can ever break the HTML/JS parser.
+    # atob() in JS decodes it back — base64 only contains [A-Za-z0-9+/=].
+    import base64 as _b64
+    all_data_b64 = _b64.b64encode(
+        json.dumps(js_rows, ensure_ascii=False).encode("utf-8")
+    ).decode("ascii")
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -986,15 +991,17 @@ def build_html_report(results: list[dict], csv_path: str, elapsed: float,
 </div>
 
 <script>
-let ALL_DATA, PAGE_SIZE_VAL;
+// Data is base64-encoded JSON — immune to any content in crawled pages.
+// No URL, anchor text, or page content can ever break this script block.
+let ALL_DATA;
 try {{
-  ALL_DATA = {all_data_json};
+  ALL_DATA = JSON.parse(atob('{all_data_b64}'));
 }} catch(e) {{
   ALL_DATA = [];
-  console.error("Failed to parse report data:", e);
+  console.error("Failed to decode report data:", e);
   document.addEventListener("DOMContentLoaded", () => {{
     const tb = document.getElementById("tbody");
-    if(tb) tb.innerHTML = '<tr><td colspan="10" style="color:#f87171;padding:20px;text-align:center">⚠️ Report data failed to load. Download the CSV or Excel file for full results.</td></tr>';
+    if(tb) tb.innerHTML = '<tr><td colspan="10" style="color:#f87171;padding:20px;text-align:center">⚠️ Report data failed to decode. Download the CSV or Excel file for full results.</td></tr>';
   }});
 }}
 const PAGE_SIZE = {PAGE_SIZE};
