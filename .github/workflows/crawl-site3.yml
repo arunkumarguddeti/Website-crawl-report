@@ -119,6 +119,13 @@ jobs:
           fi
           echo "✅ Mode: ${MODE:-scheduled-full}"
 
+      - name: Capture site URL
+        id: site
+        run: |
+          URL="${ github.event.inputs.base_url || secrets.BASE_URL_SITE3 }"
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "Site URL: $URL"
+
       - name: Run crawler
         env:
           BASE_URL:       ${{ github.event.inputs.base_url || secrets.BASE_URL_SITE3 || 'https://www.site3.com' }}
@@ -205,6 +212,19 @@ jobs:
             reports/*.xlsx
           retention-days: 30
 
+      - name: Include archive in Pages deployment
+        run: |
+          # Pull archive folder from gh-pages branch into reports/ so
+          # the full archive is accessible at the GitHub Pages URL
+          if git fetch origin gh-pages 2>/dev/null; then
+            mkdir -p reports/archive
+            git checkout origin/gh-pages -- archive/ 2>/dev/null || true
+            cp -r archive/. reports/archive/ 2>/dev/null || true
+            echo "✅ Archive included in Pages deployment"
+          else
+            echo "No gh-pages branch yet — skipping archive copy"
+          fi
+
       - name: Upload to GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
@@ -230,6 +250,7 @@ jobs:
           body: |
             Broken Link Report — Site 3
 
+            Site: ${{ steps.site.outputs.url }}
             Run #${{ github.run_number }} | Status: ${{ job.status }}
             Mode: ${{ github.event.inputs.scan_mode || 'full (scheduled)' }}
             Label: ${{ github.event.inputs.scan_label || 'none' }}

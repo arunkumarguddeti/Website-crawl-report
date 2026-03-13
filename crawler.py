@@ -988,25 +988,33 @@ let filtered = ALL_DATA.slice();
 let sortCol  = -1, sortAsc = true, curPage = 0;
 
 // ── CHARTS ──────────────────────────────────────────────────
-new Chart(document.getElementById('donut').getContext('2d'), {{
-  type:'doughnut',
-  data:{{labels:{chart_labels},datasets:[{{data:{chart_values},backgroundColor:{chart_colors},borderWidth:2,borderColor:'#1e293b'}}]}},
-  options:{{responsive:true,plugins:{{
-    legend:{{position:'bottom',labels:{{color:'#94a3b8',padding:10,font:{{size:11}}}}}},
-    tooltip:{{callbacks:{{label:ctx=>` ${{ctx.label}}: ${{ctx.parsed.toLocaleString()}}`}}}}
-  }}}}
-}});
-new Chart(document.getElementById('bar').getContext('2d'), {{
-  type:'bar',
-  data:{{labels:{bar_labels},datasets:[{{label:'Issues',data:{bar_values},backgroundColor:'rgba(239,68,68,0.7)',borderRadius:3}}]}},
-  options:{{indexAxis:'y',responsive:true,
-    plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:ctx=>` ${{ctx.parsed.x}} issues`}}}}}},
-    scales:{{
-      x:{{grid:{{color:'#334155'}},ticks:{{color:'#94a3b8'}}}},
-      y:{{grid:{{display:false}},ticks:{{color:'#94a3b8',font:{{size:11}}}}}}
+// Wrapped in try-catch: CDN failure won't crash renderPage
+try {{
+  new Chart(document.getElementById('donut').getContext('2d'), {{
+    type:'doughnut',
+    data:{{labels:{chart_labels},datasets:[{{data:{chart_values},backgroundColor:{chart_colors},borderWidth:2,borderColor:'#1e293b'}}]}},
+    options:{{responsive:true,plugins:{{
+      legend:{{position:'bottom',labels:{{color:'#94a3b8',padding:10,font:{{size:11}}}}}},
+      tooltip:{{callbacks:{{label:ctx=>` ${{ctx.label}}: ${{ctx.parsed.toLocaleString()}}`}}}}
+    }}}}
+  }});
+  new Chart(document.getElementById('bar').getContext('2d'), {{
+    type:'bar',
+    data:{{labels:{bar_labels},datasets:[{{label:'Issues',data:{bar_values},backgroundColor:'rgba(239,68,68,0.7)',borderRadius:3}}]}},
+    options:{{indexAxis:'y',responsive:true,
+      plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:ctx=>` ${{ctx.parsed.x}} issues`}}}}}},
+      scales:{{
+        x:{{grid:{{color:'#334155'}},ticks:{{color:'#94a3b8'}}}},
+        y:{{grid:{{display:false}},ticks:{{color:'#94a3b8',font:{{size:11}}}}}}
+      }}
     }}
-  }}
-}});
+  }});
+}} catch(e) {{
+  console.warn('Chart.js failed to load:', e);
+  document.querySelectorAll('.chart-box').forEach(el => {{
+    el.innerHTML = '<p style="color:#64748b;padding:20px;text-align:center">Charts unavailable — CDN may be blocked</p>';
+  }});
+}}
 
 // ── HELPERS ──────────────────────────────────────────────────
 function esc(s){{return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}}
