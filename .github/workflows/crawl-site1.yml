@@ -55,10 +55,10 @@ on:
     #  EST (UTC-5):  6 AM = 11:00 UTC  |  8 PM = 01:00 UTC
     #  EDT (UTC-4):  6 AM = 10:00 UTC  |  8 PM = 00:00 UTC
     #  All 4 crons run, but the dedup step below prevents double-execution.
-    - cron: '0 11 * * *'   # 6 AM EST
-    - cron: '0 10 * * *'   # 6 AM EDT
-    - cron: '0 1  * * *'   # 8 PM EST
-    - cron: '0 0  * * *'   # 8 PM EDT
+    # - cron: '0 11 * * *'   # 6 AM EST (disabled — EDT active)
+    - cron: '0 10 * * *'   # 6 AM EDT (UTC-4)
+    # - cron: '0 1  * * *'   # 8 PM EST (disabled — EDT active)
+    - cron: '0 0  * * *'   # 8 PM EDT (UTC-4)
 
 permissions:
   contents: write
@@ -177,9 +177,15 @@ jobs:
             cd -
           fi
           mkdir -p /tmp/gh-pages/archive/site1
-          cp reports/*.html /tmp/gh-pages/archive/site1/ 2>/dev/null || true
-          cp reports/*.csv  /tmp/gh-pages/archive/site1/ 2>/dev/null || true
-          cp reports/*.xlsx /tmp/gh-pages/archive/site1/ 2>/dev/null || true
+          # Only archive HTML to gh-pages (CSV/Excel too large for git)
+          for f in reports/*.html; do
+            size=$(stat -c%s "$f" 2>/dev/null || echo 0)
+            if [ "$size" -lt 52428800 ]; then  # skip files >50MB
+              cp "$f" /tmp/gh-pages/archive/site1/
+            else
+              echo "Skipping $f — too large (${size} bytes)"
+            fi
+          done
           find /tmp/gh-pages/archive/site1 -type f -mtime +60 -delete 2>/dev/null || true
           cd /tmp/gh-pages
           python3 - << 'PYEOF'
@@ -231,10 +237,7 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      # ── Email — Option A: Gmail App Password (personal accounts) ────────
-      # Requires secrets: MAIL_USERNAME, MAIL_PASSWORD (App Password), MAIL_TO
-      # Get App Password: myaccount.google.com → Security → App passwords
-      - name: Send email (Gmail App Password)
+      - name: Send email
         if: always()
         uses: dawidd6/action-send-mail@v4
         with:
@@ -245,24 +248,29 @@ jobs:
           password: ${{ secrets.MAIL_PASSWORD }}
           to: ${{ secrets.MAIL_TO }}
           from: Crawl Reports <${{ secrets.MAIL_USERNAME }}>
-          subject: "🔗 Broken Link Report — ${{ github.event.inputs.base_url || 'Scheduled' }} — Run #${{ github.run_number }}"
-          convert_markdown: true
+          subject: "Broken Link Report — Site 1 — Run #${{ github.run_number }} — ${{ job.status }}"
+          convert_markdown: false
           body: |
-            ## Broken Link Report Complete
+            Broken Link Report — Site 1
 
-            **Site:** ${{ github.event.inputs.base_url || 'Scheduled run' }}
-            **Mode:** ${{ github.event.inputs.scan_mode || 'full (scheduled)' }}
-            **Label:** ${{ github.event.inputs.scan_label || '—' }}
-            **Run:** #${{ github.run_number }}
-            **Status:** ${{ job.status }}
+            Run #${{ github.run_number }} | Status: ${{ job.status }}
+            Mode: ${{ github.event.inputs.scan_mode || 'full (scheduled)' }}
+            Label: ${{ github.event.inputs.scan_label || 'none' }}
 
-            ---
+            ── QUICK SUMMARY ──────────────────────────────
+            See attached or visit the links below for full results.
+            The report table shows Broken, Redirect, Timeout and Error links.
+            200 OK links are in the Excel/CSV exports only.
+            ───────────────────────────────────────────────
 
-            📊 **[View Live Report](${{ steps.deployment.outputs.page_url }})**
+            View Live Report:
+            ${{ steps.deployment.outputs.page_url }}
 
-            📂 **[Browse Archive](https://github.com/${{ github.repository }}/blob/gh-pages/archive/site1/index.html)**
+            Browse Archive (Site 1):
+            https://arunkumarguddeti.github.io/Crawl-report/archive/site1/
 
-            📁 **[Download ZIP](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})**
+            Download ZIP (HTML + CSV + Excel):
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
       - name: Write job summary
         if: always()
         run: |

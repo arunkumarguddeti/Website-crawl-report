@@ -745,15 +745,20 @@ def build_html_report(results: list[dict], csv_path: str, elapsed: float,
             return f"{ms} ms"
         return f"{ms/1000:.1f}s"
 
+    # Only embed non-200 rows in HTML to keep file size under GitHub's 100MB limit.
+    # 200 OK rows are still exported in full to CSV and Excel.
     js_rows = []
     for r in results:
+        s = str(r.get("status",""))
+        if s == "200":
+            continue  # skip OK rows from HTML — available in CSV/Excel
         lm = r.get("load_ms", -1)
         js_rows.append({
             "pu": r["page_url"],
             "lu": r["link_url"],
             "lt": r.get("link_text","")[:120],
             "tp": r.get("link_type",""),
-            "st": str(r["status"]),
+            "st": s,
             "fu": r.get("final_url",""),
             "lm": lm if lm is not None else -1,
             "dp": r.get("depth",""),
@@ -903,6 +908,11 @@ def build_html_report(results: list[dict], csv_path: str, elapsed: float,
     <div class="card c-orange" onclick="cardFilter('unkn')"      id="card-err">     <div class="val">{errors:,}</div>   <div class="lbl">Timeout / Error</div></div>
     <div class="card c-blue"   onclick="typeFilter2('internal')" id="card-int">     <div class="val">{internal:,}</div> <div class="lbl">Internal Links</div></div>
     <div class="card c-white"  onclick="typeFilter2('external')" id="card-ext">     <div class="val">{external:,}</div> <div class="lbl">External Links</div></div>
+  </div>
+
+  <div style="background:#1e3a2f;border:1px solid #16a34a;border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:13px;color:#86efac;">
+    ✅ <b>200 OK links are excluded from this view</b> to keep the report fast and focused.
+    The full dataset including all OK links is available in the <b>Excel</b> and <b>CSV</b> exports above.
   </div>
 
   <div class="charts">

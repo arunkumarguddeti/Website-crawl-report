@@ -133,9 +133,15 @@ jobs:
             cd -
           fi
           mkdir -p /tmp/gh-pages/archive/adhoc
-          cp reports/*.html /tmp/gh-pages/archive/adhoc/ 2>/dev/null || true
-          cp reports/*.csv  /tmp/gh-pages/archive/adhoc/ 2>/dev/null || true
-          cp reports/*.xlsx /tmp/gh-pages/archive/adhoc/ 2>/dev/null || true
+          # Only archive HTML to gh-pages (CSV/Excel too large for git)
+          for f in reports/*.html; do
+            size=$(stat -c%s "$f" 2>/dev/null || echo 0)
+            if [ "$size" -lt 52428800 ]; then  # skip files >50MB
+              cp "$f" /tmp/gh-pages/archive/adhoc/
+            else
+              echo "Skipping $f — too large (${size} bytes)"
+            fi
+          done
           find /tmp/gh-pages/archive/adhoc -type f -mtime +30 -delete 2>/dev/null || true
           cd /tmp/gh-pages
           python3 - << 'PYEOF'
@@ -197,19 +203,29 @@ jobs:
           password: ${{ secrets.MAIL_PASSWORD }}
           to: ${{ secrets.MAIL_TO }}
           from: Crawl Reports <${{ secrets.MAIL_USERNAME }}>
-          subject: "🔍 Ad-Hoc Report — ${{ github.event.inputs.base_url }} — Run #${{ github.run_number }}"
-          convert_markdown: true
+          subject: "Broken Link Report — Ad-Hoc — Run #${{ github.run_number }} — ${{ job.status }}"
+          convert_markdown: false
           body: |
-            ## Ad-Hoc Crawl Complete
+            Broken Link Report — Ad-Hoc Scan
 
-            **URL:** ${{ github.event.inputs.base_url }}
-            **Mode:** ${{ github.event.inputs.scan_mode }}
-            **Label:** ${{ github.event.inputs.scan_label || '—' }}
-            **Status:** ${{ job.status }}
+            Run #${{ github.run_number }} | Status: ${{ job.status }}
+            URL: ${{ github.event.inputs.base_url }}
+            Mode: ${{ github.event.inputs.scan_mode }}
+            Label: ${{ github.event.inputs.scan_label || 'none' }}
 
-            📊 **[View Live Report](${{ steps.deployment.outputs.page_url }})**
+            ── QUICK SUMMARY ──────────────────────────────
+            The report table shows Broken, Redirect, Timeout and Error links.
+            200 OK links are in the Excel/CSV exports only.
+            ───────────────────────────────────────────────
 
-            📁 **[Download ZIP](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})**
+            View Live Report:
+            ${{ steps.deployment.outputs.page_url }}
+
+            Browse Ad-Hoc Archive:
+            https://arunkumarguddeti.github.io/Crawl-report/archive/adhoc/
+
+            Download ZIP (HTML + CSV + Excel):
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: Write job summary
         if: always()

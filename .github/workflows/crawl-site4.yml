@@ -44,10 +44,10 @@ on:
   schedule:
     #  EST (UTC-5):  7:30 AM = 12:00 UTC  |  9:30 PM = 02:00 UTC
     #  EDT (UTC-4):  7:30 AM = 11:00 UTC  |  9:30 PM = 01:00 UTC
-    - cron: '30 12 * * *'
-    - cron: '30 11 * * *'
-    - cron: '30 2  * * *'
-    - cron: '30 1  * * *'
+    # - cron: '30 12 * * *'  # 7:30 AM EST (disabled)
+    - cron: '30 11 * * *'  # 7:30 AM EDT (UTC-4)
+    # - cron: '30 2  * * *'  # 9:30 PM EST (disabled)
+    - cron: '30 1  * * *'  # 9:30 PM EDT (UTC-4)
 
 permissions:
   contents: write
@@ -155,9 +155,15 @@ jobs:
             cd -
           fi
           mkdir -p /tmp/gh-pages/archive/site4
-          cp reports/*.html /tmp/gh-pages/archive/site4/ 2>/dev/null || true
-          cp reports/*.csv  /tmp/gh-pages/archive/site4/ 2>/dev/null || true
-          cp reports/*.xlsx /tmp/gh-pages/archive/site4/ 2>/dev/null || true
+          # Only archive HTML to gh-pages (CSV/Excel too large for git)
+          for f in reports/*.html; do
+            size=$(stat -c%s "$f" 2>/dev/null || echo 0)
+            if [ "$size" -lt 52428800 ]; then  # skip files >50MB
+              cp "$f" /tmp/gh-pages/archive/site4/
+            else
+              echo "Skipping $f — too large (${size} bytes)"
+            fi
+          done
           find /tmp/gh-pages/archive/site4 -type f -mtime +60 -delete 2>/dev/null || true
           cd /tmp/gh-pages
           python3 - << 'PYEOF'
@@ -208,7 +214,7 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Send email (Gmail App Password)
+      - name: Send email
         if: always()
         uses: dawidd6/action-send-mail@v4
         with:
@@ -219,19 +225,29 @@ jobs:
           password: ${{ secrets.MAIL_PASSWORD }}
           to: ${{ secrets.MAIL_TO }}
           from: Crawl Reports <${{ secrets.MAIL_USERNAME }}>
-          subject: "🔗 Broken Link Report — ${{ github.event.inputs.base_url || secrets.BASE_URL_SITE4 }} — Run #${{ github.run_number }}"
-          convert_markdown: true
+          subject: "Broken Link Report — Site 4 — Run #${{ github.run_number }} — ${{ job.status }}"
+          convert_markdown: false
           body: |
-            ## Broken Link Report Complete
+            Broken Link Report — Site 4
 
-            **Site:** ${{ github.event.inputs.base_url || secrets.BASE_URL_SITE4 }}
-            **Mode:** ${{ github.event.inputs.scan_mode || 'full (scheduled)' }}
-            **Label:** ${{ github.event.inputs.scan_label || '—' }}
-            **Status:** ${{ job.status }}
+            Run #${{ github.run_number }} | Status: ${{ job.status }}
+            Mode: ${{ github.event.inputs.scan_mode || 'full (scheduled)' }}
+            Label: ${{ github.event.inputs.scan_label || 'none' }}
 
-            📊 **[View Live Report](${{ steps.deployment.outputs.page_url }})**
+            ── QUICK SUMMARY ──────────────────────────────
+            See attached or visit the links below for full results.
+            The report table shows Broken, Redirect, Timeout and Error links.
+            200 OK links are in the Excel/CSV exports only.
+            ───────────────────────────────────────────────
 
-            📁 **[Download ZIP](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})**
+            View Live Report:
+            ${{ steps.deployment.outputs.page_url }}
+
+            Browse Archive (Site 4):
+            https://arunkumarguddeti.github.io/Crawl-report/archive/site4/
+
+            Download ZIP (HTML + CSV + Excel):
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
       - name: Write job summary
         if: always()
         run: |
