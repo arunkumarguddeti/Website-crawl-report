@@ -767,9 +767,11 @@ def build_html_report(results: list[dict], csv_path: str, elapsed: float,
             "rc": row_class(r["status"]),
             "ts": str(r.get("timestamp",""))[:22],
         })
+    # Web-safe JSON: escape < and > so NO HTML tag (</script>, </div>, etc.)
+    # can ever break the script block, regardless of what URLs/text are crawled.
+    # \u003c = <  |  \u003e = >  — valid JSON, browsers decode transparently.
     all_data_json = json.dumps(js_rows, ensure_ascii=True)
-    # Prevent </script> in any value from breaking the HTML script block
-    all_data_json = all_data_json.replace("</script>", "<" + "/script>").replace("</Script>", "<" + "/Script>")
+    all_data_json = all_data_json.replace("<", "\u003c").replace(">", "\u003e")
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
