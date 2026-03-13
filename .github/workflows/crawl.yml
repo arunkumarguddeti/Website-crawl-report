@@ -22,7 +22,7 @@ on:
           [FULL MODE] Website to crawl from root.
           [TARGETED MODE] Site root — used for Internal vs External classification.
         required: true
-        default: 'https://www.example.com'
+        default: ''
 
       target_pages:
         description: |

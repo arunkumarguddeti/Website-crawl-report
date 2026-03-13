@@ -19,7 +19,7 @@ on:
       base_url:
         description: 'Website base URL'
         required: true
-        default: 'https://www.site2.com'
+        default: ''
       target_pages:
         description: '[TARGETED ONLY] Comma-separated page URLs'
         required: false

@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────────────────────
 #  crawl-site4.yml
-#  Set BASE_URL_SITE3 in repo Settings → Secrets → Actions
+#  Set BASE_URL_SITE4 in repo Settings → Secrets → Actions
 #  Runs 60 min after Site 1 to avoid Pages conflicts.
 # ─────────────────────────────────────────────────────────────
 name: Broken Link Crawler — Site 4
@@ -19,7 +19,7 @@ on:
       base_url:
         description: '[FULL MODE] Website to crawl / [TARGETED MODE] Site root for domain matching'
         required: true
-        default: 'https://www.site4.com'
+        default: ''
       target_pages:
         description: '[TARGETED ONLY] Comma-separated URLs. Example: https://site.com/about,https://site.com/contact'
         required: false
@@ -121,7 +121,7 @@ jobs:
 
       - name: Run crawler
         env:
-          BASE_URL:       ${{ github.event.inputs.base_url || secrets.BASE_URL_SITE3 || 'https://www.site4.com' }}
+          BASE_URL:       ${{ github.event.inputs.base_url || secrets.BASE_URL_SITE4 || 'https://www.site4.com' }}
           TARGET_PAGES:   ${{ github.event.inputs.target_pages || '' }}
           SCAN_LABEL:     ${{ github.event.inputs.scan_label || '' }}
           MAX_DEPTH:      ${{ github.event.inputs.max_depth || '8' }}
@@ -219,12 +219,12 @@ jobs:
           password: ${{ secrets.MAIL_PASSWORD }}
           to: ${{ secrets.MAIL_TO }}
           from: Crawl Reports <${{ secrets.MAIL_USERNAME }}>
-          subject: "🔗 Broken Link Report — ${{ github.event.inputs.base_url || secrets.BASE_URL_SITE3 }} — Run #${{ github.run_number }}"
+          subject: "🔗 Broken Link Report — ${{ github.event.inputs.base_url || secrets.BASE_URL_SITE4 }} — Run #${{ github.run_number }}"
           convert_markdown: true
           body: |
             ## Broken Link Report Complete
 
-            **Site:** ${{ github.event.inputs.base_url || secrets.BASE_URL_SITE3 }}
+            **Site:** ${{ github.event.inputs.base_url || secrets.BASE_URL_SITE4 }}
             **Mode:** ${{ github.event.inputs.scan_mode || 'full (scheduled)' }}
             **Label:** ${{ github.event.inputs.scan_label || '—' }}
             **Status:** ${{ job.status }}

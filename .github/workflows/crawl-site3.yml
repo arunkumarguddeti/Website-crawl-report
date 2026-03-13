@@ -19,7 +19,7 @@ on:
       base_url:
         description: '[FULL MODE] Website to crawl / [TARGETED MODE] Site root for domain matching'
         required: true
-        default: 'https://www.site3.com'
+        default: ''
       target_pages:
         description: '[TARGETED ONLY] Comma-separated URLs. Example: https://site.com/about,https://site.com/contact'
         required: false
