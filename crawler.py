@@ -767,7 +767,9 @@ def build_html_report(results: list[dict], csv_path: str, elapsed: float,
             "rc": row_class(r["status"]),
             "ts": str(r.get("timestamp",""))[:22],
         })
-    all_data_json = json.dumps(js_rows, ensure_ascii=False)
+    all_data_json = json.dumps(js_rows, ensure_ascii=True)
+    # Prevent </script> in any value from breaking the HTML script block
+    all_data_json = all_data_json.replace("</script>", "<" + "/script>").replace("</Script>", "<" + "/Script>")
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -982,7 +984,17 @@ def build_html_report(results: list[dict], csv_path: str, elapsed: float,
 </div>
 
 <script>
-const ALL_DATA  = {all_data_json};
+let ALL_DATA, PAGE_SIZE_VAL;
+try {{
+  ALL_DATA = {all_data_json};
+}} catch(e) {{
+  ALL_DATA = [];
+  console.error("Failed to parse report data:", e);
+  document.addEventListener("DOMContentLoaded", () => {{
+    const tb = document.getElementById("tbody");
+    if(tb) tb.innerHTML = '<tr><td colspan="10" style="color:#f87171;padding:20px;text-align:center">⚠️ Report data failed to load. Download the CSV or Excel file for full results.</td></tr>';
+  }});
+}}
 const PAGE_SIZE = {PAGE_SIZE};
 let filtered = ALL_DATA.slice();
 let sortCol  = -1, sortAsc = true, curPage = 0;
