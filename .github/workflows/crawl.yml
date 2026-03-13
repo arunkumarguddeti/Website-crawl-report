@@ -230,7 +230,7 @@ jobs:
       # Requires secrets: MAIL_USERNAME, MAIL_PASSWORD (App Password), MAIL_TO
       # Get App Password: myaccount.google.com → Security → App passwords
       - name: Send email (Gmail App Password)
-        if: ${{ always() && secrets.MAIL_PASSWORD != '' }}
+        if: always()
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -258,25 +258,6 @@ jobs:
             📂 **[Browse Archive](https://github.com/${{ github.repository }}/blob/gh-pages/archive/site1/index.html)**
 
             📁 **[Download ZIP](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})**
-
-      # ── Email — Option B: SendGrid (Workspace accounts / Gmail alternative) ─
-      # Free tier: 100 emails/day. Sign up at sendgrid.com, get an API key.
-      # Requires secrets: SENDGRID_API_KEY, MAIL_TO, MAIL_FROM
-      - name: Send email (SendGrid)
-        if: ${{ always() && secrets.SENDGRID_API_KEY != '' }}
-        uses: peter-evans/sendgrid-action@v1
-        with:
-          api-key: ${{ secrets.SENDGRID_API_KEY }}
-          to: ${{ secrets.MAIL_TO }}
-          from: ${{ secrets.MAIL_FROM }}
-          subject: "🔗 Broken Link Report — Run #${{ github.run_number }}"
-          body: |
-            Broken Link Report Complete.
-            Site: ${{ github.event.inputs.base_url || 'Scheduled' }}
-            Mode: ${{ github.event.inputs.scan_mode || 'full' }}
-            Live report: ${{ steps.deployment.outputs.page_url }}
-            Download: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
       - name: Write job summary
         if: always()
         run: |

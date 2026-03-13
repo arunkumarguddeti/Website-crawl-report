@@ -204,7 +204,7 @@ jobs:
         uses: actions/deploy-pages@v4
 
       - name: Send email (Gmail App Password)
-        if: ${{ always() && secrets.MAIL_PASSWORD != '' }}
+        if: always()
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -227,20 +227,6 @@ jobs:
             📊 **[View Live Report](${{ steps.deployment.outputs.page_url }})**
 
             📁 **[Download ZIP](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})**
-
-      - name: Send email (SendGrid)
-        if: ${{ always() && secrets.SENDGRID_API_KEY != '' }}
-        uses: peter-evans/sendgrid-action@v1
-        with:
-          api-key: ${{ secrets.SENDGRID_API_KEY }}
-          to: ${{ secrets.MAIL_TO }}
-          from: ${{ secrets.MAIL_FROM }}
-          subject: "🔗 Site 4 Report — Run #${{ github.run_number }}"
-          body: |
-            Crawl complete.
-            Live report: ${{ steps.deployment.outputs.page_url }}
-            Download: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
       - name: Write job summary
         if: always()
         run: |
