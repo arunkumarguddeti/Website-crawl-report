@@ -71,6 +71,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - name: Check actor permission
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ github.actor }}" != "${{ github.repository_owner }}" ]; then
+            echo "❌ Unauthorized: only the repo owner can trigger this workflow manually."
+            exit 1
+          fi
+          echo "✅ Authorized: ${{ github.actor }}"
+
 
       - name: Check dedup slot
         id: dedup
@@ -142,8 +151,8 @@ jobs:
 
       - name: Verify reports
         run: |
-          ls -lh reports/
-          test -f reports/index.html && echo "✅ index.html found" || (echo "❌ Missing" && exit 1)
+          ls -lh reports/ || echo "⚠️ reports/ is empty or missing"
+          test -f reports/index.html && echo "✅ index.html found" || (echo "❌ index.html missing" && exit 1)
 
       - name: Archive report to gh-pages
         run: |

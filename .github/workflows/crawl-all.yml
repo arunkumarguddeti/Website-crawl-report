@@ -33,6 +33,14 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
+      - name: Check actor permission
+        run: |
+          if [ "${{ github.actor }}" != "${{ github.repository_owner }}" ]; then
+            echo "❌ Unauthorized: only the repo owner can trigger this workflow."
+            exit 1
+          fi
+          echo "✅ Authorized: ${{ github.actor }}"
+
       - name: Trigger Site 1
         run: |
           curl -s -X POST \

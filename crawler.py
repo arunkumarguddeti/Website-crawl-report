@@ -1423,8 +1423,29 @@ async def main():
         log.info("Mode: FULL CRAWL — starting from %s", CONFIG["BASE_URL"])
         results = await crawl()
 
+    output_dir = Path(CONFIG["OUTPUT_DIR"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     if not results:
         log.warning("No results collected. Check URLs and network access.")
+        # Write an empty index.html so GitHub Pages + Verify step don't fail
+        empty_html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>Crawl Report — No Results</title>
+<style>body{{background:#0f172a;color:#e2e8f0;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}.box{{text-align:center;padding:40px;background:#1e293b;border-radius:12px;border:1px solid #334155}}</style>
+</head><body><div class="box">
+<h1 style="color:#f59e0b">⚠️ No Results</h1>
+<p>The crawler returned no data.</p>
+<p style="color:#94a3b8">Check that <b>{CONFIG["BASE_URL"]}</b> is reachable and the secret is set correctly.</p>
+</div></body></html>"""
+        (output_dir / "index.html").write_text(empty_html, encoding="utf-8")
+        import json as _json
+        _json.dump({{"url": CONFIG["BASE_URL"], "mode": "failed", "label": "",
+                     "run_date": now_est().strftime("%Y-%m-%d %H:%M:%S %Z"),
+                     "duration": "0s", "pages": 0, "total_links": 0, "ok": 0,
+                     "broken": 0, "redirects": 0, "server_errors": 0,
+                     "timeouts": 0, "internal": 0, "external": 0}},
+                    open(str(output_dir / "summary.json"), "w"))
+        return
         return
 
     elapsed  = time.time() - start_time
@@ -1434,9 +1455,6 @@ async def main():
     label    = CONFIG.get("SCAN_LABEL", "")
     safe_label = label.replace(" ", "_").replace("/", "_")[:30] if label else ""
     file_tag   = f"{ts_tag}_{safe_label}" if safe_label else ts_tag
-
-    output_dir = Path(CONFIG["OUTPUT_DIR"])
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     csv_path   = str(output_dir / f"broken_links_{file_tag}.csv")
     html_path  = str(output_dir / f"report_{file_tag}.html")
